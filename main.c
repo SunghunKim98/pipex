@@ -49,9 +49,13 @@ static void cmd_init(const char *cmd, t_cmd *p)
 	p->cmd[4] = ft_strjoin("/usr/sbin/", arr[0]);
 	p->argv = (char *const *)arr;
 	p->envp = 0;
+
+	int i = -1;
+	while (arr[++i])
+		printf("%d: %s\n", i, arr[i]);
 }
 
-static void	run_cmd(t_cmd cmd)
+static void	execute_command(t_cmd cmd)
 {
 	int		i;
 
@@ -60,7 +64,6 @@ static void	run_cmd(t_cmd cmd)
 		execve(cmd.cmd[i], cmd.argv, cmd.envp);
 	perror(cmd.argv[0]);
 }
-
 
 int main(int argc, char **argv)
 {
@@ -73,22 +76,23 @@ int main(int argc, char **argv)
 	pid = fork();
 	if (pid > 0) // parent
 	{
-		// 신호를 주지 않아도 child에서 exit하니까 알아서 꺼지는데??
-		waitpid(pid, &status, 0);
-		if (WIFSIGNALED(status))
+		waitpid(pid, &status, 0); // 자식 프로세스가 종료될 때까지 여기서 Block상태로 대기.
+		if (WIFSIGNALED(status)) // 비정상 종료
 			exit(1);
 
-		redirect_out(argv[4]);
-		connect_pipe(pipefd, STDIN_FILENO);
+		redirect_out(argv[4]); // 여기서 출력되는 것들은 파일에 쓰겠다는 것을 의미 -> stdout의 화살표 방향을 바꿈.
+		dup2(pipefd[0], 0); // 자식 프로세스에서 보낸 것을 pipefd[0]을 통해 받아온다.
+		close(pipefd[1]);
 		cmd_init(argv[3], &cmd);
-		run_cmd(cmd);
+		execute_command(cmd); // 명령어를 실행하면, pipedfd[0]에서 read한 것들을 argv[4]의 파일에 쓰게 된다.
 	}
 	else if (pid == 0) // child
 	{
-		redirect_in(argv[1]);
-		connect_pipe(pipefd, STDOUT_FILENO);
+		redirect_in(argv[1]); // 여기서 어떤 파일을 읽어옴.
+		close(pipefd[0]);
+		dup2(pipefd[STDOUT_FILENO], STDOUT_FILENO); // 그 여기서 출력되는 부분들은 pipefd[1]로 들어간다.
 		cmd_init(argv[2], &cmd);
-		run_cmd(cmd);
+		execute_command(cmd); // 여기서 실행하면 어떤 출력의 결과가 생기고 그 출력의 결과들은 pipefd[1]을 타고 들어간다.
 	}
 
 
