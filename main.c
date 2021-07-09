@@ -49,10 +49,6 @@ static void cmd_init(const char *cmd, t_cmd *p)
 	p->cmd[4] = ft_strjoin("/usr/sbin/", arr[0]);
 	p->argv = (char *const *)arr;
 	p->envp = 0;
-
-	int i = -1;
-	while (arr[++i])
-		printf("%d: %s\n", i, arr[i]);
 }
 
 void	fork_fail()
@@ -71,17 +67,23 @@ static void	execute_command(t_cmd cmd)
 	perror(cmd.argv[0]);
 }
 
-static void child_re(int *pipe_stuff, int index)
+static void child_re(const char *file, char **argv, int *pipe_stuff, int index)
 {
 	pid_t   pid;
 	int     pipe_re[2];
 	t_cmd	cmd;
 	int		status;
+	int		fd;
 
 	if (index == 2)
 	{
-		dup2(pipe_stuff[STDOUT_FILENO], STDOUT_FILENO) // pipe로 넘기고
-		// execute(); -> pipe_re[]
+		redirect_in(file);
+		dup2(pipe_stuff[STDOUT_FILENO], STDOUT_FILENO); // pipe로 넘기고
+		
+		close(pipe_stuff[0]);
+		
+		cmd_init(argv[index], &cmd);
+		execute_command(cmd);
 	}
 	else
 	{
@@ -92,17 +94,20 @@ static void child_re(int *pipe_stuff, int index)
 			waitpid(pid, &status, 0); // 자식 프로세스가 종료될 때까지 여기서 Block상태로 대기.
 			if (WIFSIGNALED(status)) // 비정상 종료
 				exit(1);
-			dup2(pipe_re[STDIN_FILENO], STDIN_FILENO)	// pipe로 받아와서
-			// execute
+			dup2(pipe_re[STDIN_FILENO], STDIN_FILENO);	// pipe로 받아와서
+			dup2(pipe_stuff[STDOUT_FILENO], STDOUT_FILENO);
+
+			close(pipe_re[0]);
+			close(pipe_re[1]);
+
+			cmd_init(argv[index], &cmd);
+			execute_command(cmd);
 		}
 		else if (pid == 0) // child
-		{
-			child_re(pipe_re); // 재귀타러 들어감.
-		}
+			child_re(file, argv, pipe_re, --index); // 재귀타러 들어감.
 		else
 			fork_fail();
 	}
-
 }
 
 int main(int argc, char **argv)
@@ -117,16 +122,17 @@ int main(int argc, char **argv)
 
 	if (pid > 0) // parent
 	{
-
+		waitpid(pid, &status, 0);
+		redirect_out(argv[argc - 1]);
+		dup2(pipefd[STDIN_FILENO], STDIN_FILENO);
+		close(pipefd[1]);
+		cmd_init("cat", &cmd);
+		execute_command(cmd);
 	}
 	else if (pid == 0) // child
-	{
-
-		child_re(pipefd[1]);
-	}
+		child_re(argv[1], argv, pipefd, argc - 2);
 	else
 		fork_fail();
-
 
 
 	// pipe(pipefd);
